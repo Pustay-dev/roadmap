@@ -68,20 +68,25 @@
   .pbar-outer{height:10px;background:var(--bg);border-radius:5px;overflow:hidden;margin-bottom:4px;}
   .pbar-inner{height:100%;background:var(--gold);border-radius:5px;transition:width .25s ease;}
   .pct-label{font-size:11px;color:var(--muted);text-align:right;margin-bottom:12px;}
-  .btn-row{display:flex;gap:7px;flex-wrap:wrap;}
-  .btn-row button{flex:1;min-width:60px;min-height:42px;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;}
+
+  .btn-row{display:flex;gap:6px;flex-wrap:nowrap;align-items:center;}
+  .btn-row button{padding:4px 8px;background:var(--panel-2);border:1px solid var(--line);color:var(--text);border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;}
   .btn-row button:active{background:var(--gold);color:var(--bg);border-color:var(--gold);}
   .btn-row button.neg{color:var(--muted);}
 
   .tasklist{margin-top:14px;}
-  .tlrow{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:12.5px;}
+  .tlrow{display:flex;flex-direction:column;gap:6px;padding:10px 0;border-bottom:1px solid var(--line);font-size:12.5px;}
   .tlrow:last-child{border-bottom:none;}
+  .tlhead{display:flex;align-items:center;gap:8px;}
   .tlrow .chk{width:15px;height:15px;border-radius:50%;border:1.5px solid var(--muted);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--bg);}
   .tlrow .chk.done{background:var(--ok);border-color:var(--ok);}
   .tlrow .chk.current{border-color:var(--gold);}
-  .tlrow .ttl{flex:1;color:var(--text);}
+  .tlrow .ttl{flex:1;color:var(--text);font-weight:500;}
   .tlrow.done .ttl{color:var(--muted);text-decoration:line-through;}
   .tlrow .tp{color:var(--muted);font-size:11px;}
+  .tlactions{display:flex;justify-content:space-between;align-items:center;padding-left:23px;}
+  .mini-pbar{flex:1;max-width:120px;height:6px;background:var(--bg);border-radius:3px;overflow:hidden;}
+  .mini-pfill{height:100%;background:var(--gold);border-radius:3px;}
 
   .complete-banner{background:var(--panel-2);border:1px solid var(--ok);border-radius:10px;padding:16px;text-align:center;font-size:14px;}
 
@@ -374,52 +379,45 @@ function renderPhases(){
     const body = document.createElement("div");
     body.className = "panel-body";
 
-    if(i === state.currentPhaseIndex){
-      body.innerHTML += `
-        <div class="block"><div class="label">Who</div><p>${phase.who}</p></div>
-        <div class="block"><div class="label">Daily routine</div><p>${phase.routine}</p></div>
-      `;
+    body.innerHTML += `
+      <div class="block"><div class="label">Who</div><p>${phase.who}</p></div>
+      ${phase.routine ? `<div class="block"><div class="label">Daily routine</div><p>${phase.routine}</p></div>` : ''}
+    `;
 
-      const cur = findCurrentTask(phase);
-      if(cur){
-        const days = daysUntil(cur.due);
-        const uc = urgencyClass(days);
-        const dueLabel = days < 0 ? `overdue by ${-days}d` : days===0 ? "due today" : `due in ${days}d`;
-        const card = document.createElement("div");
-        card.className = "task-card";
-        card.innerHTML = `
-          <div class="thead"><div class="ttitle">${cur.title}</div><div class="urg ${uc}">${uc==='red'?'urgent':uc==='yellow'?'soon':'on track'}</div></div>
-          <div class="due">${new Date(cur.due+"T00:00:00").toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})} · ${dueLabel}</div>
-          <div class="pbar-outer"><div class="pbar-inner" style="width:${cur.pct}%;"></div></div>
-          <div class="pct-label">${cur.pct}%</div>
+    const tl = document.createElement("div");
+    tl.className = "tasklist";
+    const curTask = findCurrentTask(phase);
+
+    phase.tasks.forEach(t => {
+      const row = document.createElement("div");
+      const isDone = t.pct >= 100;
+      const isCurrent = curTask && t === curTask;
+      row.className = "tlrow" + (isDone ? " done" : "");
+      
+      row.innerHTML = `
+        <div class="tlhead">
+          <span class="chk ${isDone ? 'done' : ''} ${isCurrent ? 'current' : ''}">${isDone ? '✓' : ''}</span>
+          <span class="ttl">${t.title}</span>
+          <span class="tp">${t.pct}%</span>
+        </div>
+        <div class="tlactions">
+          <div class="mini-pbar"><div class="mini-pfill" style="width:${t.pct}%;"></div></div>
           <div class="btn-row">
             <button class="neg" data-d="-10">−10%</button>
             <button data-d="10">+10%</button>
             <button data-d="25">+25%</button>
-            <button data-d="50">+50%</button>
           </div>
-        `;
-        card.querySelectorAll("button[data-d]").forEach(btn=>{
-          btn.addEventListener("click", ()=> adjustTask(phase, cur, parseInt(btn.dataset.d,10)));
-        });
-        body.appendChild(card);
-      }
+        </div>
+      `;
 
-      const tl = document.createElement("div");
-      tl.className = "tasklist";
-      phase.tasks.forEach(t=>{
-        const row = document.createElement("div");
-        const isDone = t.pct>=100;
-        const isCurrent = cur && t===cur;
-        row.className = "tlrow" + (isDone?" done":"");
-        row.innerHTML = `<span class="chk ${isDone?'done':''} ${isCurrent?'current':''}">${isDone?'✓':''}</span><span class="ttl">${t.title}</span><span class="tp">${isDone?'100%':t.pct+'%'}</span>`;
-        tl.appendChild(row);
+      row.querySelectorAll("button[data-d]").forEach(btn => {
+        btn.addEventListener("click", () => adjustTask(phase, t, parseInt(btn.dataset.d, 10)));
       });
-      body.appendChild(tl);
-    } else {
-      body.innerHTML = `<div class="block"><div class="label">Who</div><p>${phase.who}</p></div>`;
-    }
 
+      tl.appendChild(row);
+    });
+
+    body.appendChild(tl);
     det.appendChild(body);
     list.appendChild(det);
   });
@@ -433,7 +431,16 @@ function adjustTask(phase, task, delta){
 
 /* ---------- Persistence via JSONbin.io ---------- */
 async function loadState(){
+  // Load local cache immediately for instant render
+  const cached = localStorage.getItem("roadmap_state_cache");
+  if(cached){
+    try {
+      const parsed = JSON.parse(cached);
+      if(parsed && parsed.phases) state = parsed;
+    } catch(e){}
+  }
   render();
+
   try {
     const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
       headers: { "X-Master-Key": API_KEY }
@@ -442,6 +449,7 @@ async function loadState(){
       const data = await res.json();
       if(data.record && data.record.phases){
         state = data.record;
+        localStorage.setItem("roadmap_state_cache", JSON.stringify(state));
         render();
         setSyncStatus(true);
         return;
@@ -456,6 +464,7 @@ async function loadState(){
 }
 
 function saveState(){
+  localStorage.setItem("roadmap_state_cache", JSON.stringify(state));
   if(saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(pushToCloud, 400);
 }
