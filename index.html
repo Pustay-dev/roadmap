@@ -31,14 +31,13 @@
   .sync-status button{background:none;border:none;color:var(--gold);font-size:11px;cursor:pointer;padding:0;text-decoration:underline;}
 
   /* setup banner */
-  .setup{background:var(--panel-2);border:1px solid var(--gold);border-radius:10px;padding:14px;margin-bottom:20px;font-size:13px;}
+  .setup{background:var(--panel-2);border:1px solid var(--gold);border-radius:10px;padding:14px;margin-bottom:20px;font-size:13px;position:relative;}
   .setup h3{font-size:14px;margin-bottom:6px;color:var(--gold);}
   .setup code{display:block;background:var(--bg);border-radius:6px;padding:8px 10px;margin:8px 0;word-break:break-all;font-size:12.5px;color:var(--text);}
   .setup .row{display:flex;gap:8px;}
   .setup button{flex:1;background:var(--gold);color:var(--bg);border:none;border-radius:6px;padding:9px;font-weight:600;font-size:12.5px;cursor:pointer;}
   .setup button.secondary{background:transparent;border:1px solid var(--line);color:var(--text);}
   .setup .close{position:absolute;top:10px;right:12px;background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;}
-  .setup{position:relative;}
 
   /* timeline */
   section{margin-bottom:26px;}
@@ -49,7 +48,7 @@
   .tl-node.done{background:var(--ok);}
   .tl-marker{position:absolute;top:-16px;transform:translateX(-50%);font-size:14px;line-height:1;}
   .tl-marker.expected{top:14px;color:var(--muted);}
-  .tl-labels{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:4px;}
+  .tl-labels{display:flex;justify-space-between;font-size:10px;color:var(--muted);margin-top:4px;}
   .tl-status{font-size:12.5px;margin-top:10px;color:var(--text);}
   .tl-status .pace{font-weight:600;}
   .pace.ahead{color:var(--ok);}
@@ -116,10 +115,10 @@
   <div class="setup" id="setupBanner" style="display:none;">
     <button class="close" id="setupClose">×</button>
     <h3>One-time cloud sync setup</h3>
-    <p>This save is currently only on this device. To make every device show the same progress, do one of these:</p>
+    <p>This save is currently active. To sync across all devices:</p>
     <p style="margin-top:8px;"><strong>Easiest:</strong> bookmark this exact link on your other devices —</p>
     <code id="syncUrl"></code>
-    <p><strong>Permanent:</strong> open <code style="display:inline;padding:1px 5px;">index.html</code> in your GitHub repo's web editor, set <code style="display:inline;padding:1px 5px;">SYNC_ID</code> near the top to the ID below, and commit.</p>
+    <p><strong>Permanent:</strong> set <code style="display:inline;padding:1px 5px;">SYNC_ID</code> near the top of index.html to this ID and commit:</p>
     <code id="syncIdCode"></code>
     <div class="row">
       <button id="copyUrlBtn">Copy link</button>
@@ -154,20 +153,11 @@
 </div>
 
 <script>
-/* ============ CLOUD SYNC SETUP ============
-   First run on any device: leave SYNC_ID empty below. The app creates a
-   free anonymous cloud save (via jsonblob.com, no login) and shows you
-   an ID + a ready-made link. Use the link as a bookmark on your other
-   devices, OR paste the ID into SYNC_ID here and commit to GitHub —
-   either way, every device that ends up with the same ID reads and
-   writes the exact same save, so progress is identical everywhere.
-   If the cloud service is ever unreachable, this still works locally
-   on the current device and keeps retrying — you won't lose progress.
-*/
-const SYNC_ID = "";
+/* ============ CLOUD SYNC SETUP ============ */
+const SYNC_ID = ""; 
 /* =========================================== */
 
-const BLOB_API = "https://jsonblob.com/api/jsonBlob";
+const BLOB_API = "https://api.npoint.io";
 
 function defaultState(){
   return {
@@ -282,10 +272,7 @@ function defaultState(){
 
 let state = null;
 let syncId = null;
-let cloudOk = false;
 let saveTimer = null;
-
-function todayISO(){ return new Date().toISOString().slice(0,10); }
 
 function daysUntil(dateStr){
   const d = new Date(dateStr+"T00:00:00");
@@ -316,7 +303,6 @@ function advanceIfNeeded(){
   }
 }
 
-/* ---------- render ---------- */
 function render(){
   document.getElementById("todayLabel").textContent =
     new Date().toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric',year:'numeric'});
@@ -344,7 +330,7 @@ function expectedPosition(){
     }
   }
   const frac = (now - starts[8]) / (end - starts[8]);
-  return 8 + Math.min(frac,1)*0; // clamp within final node
+  return 8 + Math.min(frac,1)*0;
 }
 
 function actualPosition(){
@@ -469,10 +455,9 @@ function adjustTask(phase, task, delta){
   saveState();
 }
 
-/* ---------- persistence ---------- */
+/* ---------- Persistence (npoint.io) ---------- */
 function urlSyncId(){
-  const p = new URLSearchParams(location.search);
-  return p.get("sync");
+  return new URLSearchParams(location.search).get("sync");
 }
 
 async function loadState(){
@@ -483,27 +468,23 @@ async function loadState(){
       const res = await fetch(`${BLOB_API}/${syncId}`);
       if(res.ok){
         state = await res.json();
-        cloudOk = true;
         localStorage.setItem("roadmap_sync_id", syncId);
         localStorage.setItem("roadmap_state_cache", JSON.stringify(state));
         setSyncStatus(true);
-        showSetupIfNeeded();
+        showSetupBanner();
         render();
         return;
       }
     }catch(e){ /* fall through */ }
-    // cloud unreachable — use local cache if we have one
+    
     const cached = localStorage.getItem("roadmap_state_cache");
-    if(cached){ state = JSON.parse(cached); }
-    else { state = defaultState(); }
-    cloudOk = false;
+    state = cached ? JSON.parse(cached) : defaultState();
     setSyncStatus(false);
-    showSetupIfNeeded();
+    showSetupBanner();
     render();
     return;
   }
 
-  // no sync id anywhere yet — first run on this device
   state = defaultState();
   await createBlob();
   render();
@@ -516,19 +497,16 @@ async function createBlob(){
       headers:{"Content-Type":"application/json"},
       body: JSON.stringify(state)
     });
-    const loc = res.headers.get("Location") || res.headers.get("location");
-    if(loc){
-      syncId = loc.split("/").pop();
+    if(res.ok){
+      const data = await res.json();
+      syncId = data.id;
       localStorage.setItem("roadmap_sync_id", syncId);
       localStorage.setItem("roadmap_state_cache", JSON.stringify(state));
-      cloudOk = true;
       setSyncStatus(true);
       showSetupBanner();
       return;
     }
-  }catch(e){ /* ignore */ }
-  // couldn't create a cloud save — local only
-  cloudOk = false;
+  }catch(e){ /* fall through */ }
   setSyncStatus(false);
 }
 
@@ -542,14 +520,12 @@ async function pushToCloud(){
   if(!syncId){ setSyncStatus(false); return; }
   try{
     const res = await fetch(`${BLOB_API}/${syncId}`, {
-      method:"PUT",
+      method:"POST",
       headers:{"Content-Type":"application/json"},
       body: JSON.stringify(state)
     });
-    cloudOk = res.ok;
     setSyncStatus(res.ok);
   }catch(e){
-    cloudOk = false;
     setSyncStatus(false);
   }
 }
@@ -567,10 +543,6 @@ function setSyncStatus(ok){
     txt.textContent = "local only — not synced";
     btn.style.display = "inline";
   }
-}
-
-function showSetupIfNeeded(){
-  if(!SYNC_ID && syncId){ showSetupBanner(); }
 }
 
 function showSetupBanner(){
