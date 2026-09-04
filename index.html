@@ -20,7 +20,6 @@
   h1,h2,h3{font-family:'Fraunces',serif;font-weight:600;margin:0;}
   a{color:var(--gold);}
 
-  /* header */
   .topbar{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;}
   .topbar h1{font-size:19px;}
   .today{font-size:11.5px;color:var(--muted);}
@@ -30,7 +29,6 @@
   .dot.off{background:var(--red);}
   .sync-status button{background:none;border:none;color:var(--gold);font-size:11px;cursor:pointer;padding:0;text-decoration:underline;}
 
-  /* timeline */
   section{margin-bottom:26px;}
   .section-title{font-size:15px;margin-bottom:10px;color:var(--muted);font-weight:500;}
   .timeline-wrap{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 14px 14px;}
@@ -46,7 +44,6 @@
   .pace.behind{color:var(--red);}
   .pace.ontrack{color:var(--gold);}
 
-  /* phase list */
   .phases{position:relative;padding-left:22px;}
   .phases::before{content:'';position:absolute;left:8px;top:6px;bottom:6px;width:1px;background:var(--line);}
   details{position:relative;margin-bottom:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;}
@@ -62,7 +59,6 @@
   .block .label{font-size:11px;letter-spacing:0.02em;color:var(--gold);font-weight:600;margin-bottom:4px;}
   .block p{font-size:13.5px;margin:0;}
 
-  /* current task card */
   .task-card{background:var(--panel-2);border-radius:10px;padding:14px;margin-top:14px;}
   .task-card .thead{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px;}
   .task-card .ttitle{font-size:14.5px;font-weight:600;}
@@ -104,7 +100,7 @@
   <div class="sync-status" id="syncStatus">
     <span class="dot" id="syncDot"></span>
     <span id="syncText">checking sync…</span> 
-    <button id="syncNowBtn">retry sync</button>
+    <button id="syncNowBtn" style="display:none;">retry sync</button>
   </div>
 
   <section>
@@ -134,8 +130,10 @@
 </div>
 
 <script>
-const HARDCODED_ID = "01a06ba5-abcb-7d3a-9b46-619cd267c293";
-const BLOB_API = "https://jsonblob.com/api/jsonBlob";
+/* === PASTE YOUR GITHUB DETAILS HERE === */
+const GITHUB_TOKEN = "PASTE_YOUR_GHP_TOKEN_HERE";
+const GIST_ID = "PASTE_YOUR_GIST_ID_HERE";
+/* ======================================= */
 
 function defaultState(){
   return {
@@ -248,15 +246,8 @@ function defaultState(){
   };
 }
 
-let state = null;
+let state = defaultState();
 let saveTimer = null;
-
-function validateState(parsed){
-  if (!parsed || typeof parsed !== 'object') return null;
-  if (!Array.isArray(parsed.phases) || parsed.phases.length === 0) return null;
-  if (typeof parsed.currentPhaseIndex !== 'number') parsed.currentPhaseIndex = 0;
-  return parsed;
-}
 
 function daysUntil(dateStr){
   const d = new Date(dateStr+"T00:00:00");
@@ -442,79 +433,68 @@ function adjustTask(phase, task, delta){
   saveState();
 }
 
-/* ---------- Persistence ---------- */
-function getActiveSyncId(){
-  const urlParam = new URLSearchParams(window.location.search).get("sync");
-  if(urlParam) {
-    localStorage.setItem("roadmap_sync_id", urlParam);
-    return urlParam;
-  }
-  return localStorage.getItem("roadmap_sync_id") || HARDCODED_ID;
-}
-
+/* ---------- Persistence via GitHub Gist ---------- */
 async function loadState(){
-  // Load local cache immediately so UI displays fast
-  const cached = localStorage.getItem("roadmap_state_cache");
-  if (cached) {
-    try {
-      const parsed = validateState(JSON.parse(cached));
-      if (parsed) state = parsed;
-    } catch(e){}
+  render();
+  if(!GITHUB_TOKEN || !GIST_ID || GITHUB_TOKEN.includes("PASTE")) {
+    setSyncStatus(false, "missing API token");
+    return;
   }
 
-  if (!state) state = defaultState();
-  render();
-
-  // Try fetching from cloud
-  const syncId = getActiveSyncId();
-  if (syncId) {
-    try {
-      const res = await fetch(`${BLOB_API}/${syncId}`, {
-        headers: { "Accept": "application/json" }
-      });
-      if (res.ok) {
-        const remoteData = validateState(await res.json());
-        if (remoteData) {
-          state = remoteData;
-          localStorage.setItem("roadmap_state_cache", JSON.stringify(state));
-          setSyncStatus(true);
+  try {
+    const res = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
+      headers: { "Authorization": `token ${GITHUB_TOKEN}` }
+    });
+    if(res.ok){
+      const data = await res.json();
+      if(data.files && data.files["roadmap.json"] && data.files["roadmap.json"].content){
+        const parsed = JSON.parse(data.files["roadmap.json"].content);
+        if(parsed && parsed.phases){
+          state = parsed;
           render();
+          setSyncStatus(true);
           return;
         }
       }
-    } catch(e){}
+      // If Gist is empty, save initial state
+      pushToCloud();
+    } else {
+      setSyncStatus(false, "Gist error");
+    }
+  } catch(e) {
+    setSyncStatus(false, "connection error");
   }
-  
-  // If fetch failed or yielded empty data, attempt initialization update
-  pushToCloud();
 }
 
 function saveState(){
-  localStorage.setItem("roadmap_state_cache", JSON.stringify(state));
   if(saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(pushToCloud, 400);
+  saveTimer = setTimeout(pushToCloud, 300);
 }
 
 async function pushToCloud(){
-  const syncId = getActiveSyncId();
-  if(!syncId) return;
-  document.getElementById("syncText").textContent = "syncing…";
-  try{
-    const res = await fetch(`${BLOB_API}/${syncId}`, {
-      method:"PUT",
-      headers:{
-        "Content-Type":"application/json",
-        "Accept":"application/json"
+  if(!GITHUB_TOKEN || !GIST_ID || GITHUB_TOKEN.includes("PASTE")) return;
+  document.getElementById("syncText").textContent = "saving…";
+  
+  try {
+    const res = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
+      method: "PATCH",
+      headers: {
+        "Authorization": `token ${GITHUB_TOKEN}`,
+        "Content-Type": "application/json"
       },
-      body: JSON.stringify(state)
+      body: JSON.stringify({
+        files: {
+          "roadmap.json": { content: JSON.stringify(state, null, 2) }
+        }
+      })
     });
     setSyncStatus(res.ok);
-  } catch(e){
-    setSyncStatus(false);
+  } catch(e) {
+    setSyncStatus(false, "save failed");
   }
 }
 
-function setSyncStatus(ok){
+function setSyncStatus(ok, msg){
   const dot = document.getElementById("syncDot");
   const txt = document.getElementById("syncText");
   const btn = document.getElementById("syncNowBtn");
@@ -524,7 +504,7 @@ function setSyncStatus(ok){
     btn.style.display = "none";
   } else {
     dot.className = "dot off";
-    txt.textContent = "local mode (click to sync)";
+    txt.textContent = msg ? `sync error (${msg})` : "offline";
     btn.style.display = "inline";
   }
 }
