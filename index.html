@@ -135,7 +135,7 @@
 </div>
 
 <script>
-const BIN_ID = "6a9a937ada38895dfe37c125";
+const BIN_ID = "6a9a8f08f5f4af5e296941b1";
 const API_KEY = "$2a$10$hlqfMzR5Oh/4/9sT94qsn.9nKQ.nyIYDwhpAXEDkOuFVmjKz.JDtm";
 
 function defaultState(){
@@ -273,19 +273,19 @@ function phaseDone(phase){
   return phase.tasks.every(t => t.pct >= 100);
 }
 
-function advanceIfNeeded(){
-  while(state.currentPhaseIndex < state.phases.length &&
-        phaseDone(state.phases[state.currentPhaseIndex]) &&
-        state.currentPhaseIndex < state.phases.length - 1){
-    state.currentPhaseIndex++;
+function syncActivePhase(){
+  let firstUnfinished = 0;
+  while(firstUnfinished < state.phases.length - 1 && phaseDone(state.phases[firstUnfinished])){
+    firstUnfinished++;
   }
+  state.currentPhaseIndex = firstUnfinished;
 }
 
 function render(){
   document.getElementById("todayLabel").textContent =
     new Date().toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric',year:'numeric'});
 
-  advanceIfNeeded();
+  syncActivePhase();
   renderTimeline();
   renderPhases();
 }
@@ -431,7 +431,6 @@ function adjustTask(phase, task, delta){
 
 /* ---------- Persistence via JSONbin.io ---------- */
 async function loadState(){
-  // Load local cache immediately for instant render
   const cached = localStorage.getItem("roadmap_state_cache");
   if(cached){
     try {
