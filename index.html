@@ -30,11 +30,6 @@
   .dot.off{background:var(--red);}
   .sync-status button{background:none;border:none;color:var(--gold);font-size:11px;cursor:pointer;padding:0;text-decoration:underline;}
 
-  /* setup banner */
-  .setup{background:var(--panel-2);border:1px solid var(--red);border-radius:10px;padding:14px;margin-bottom:20px;font-size:13px;position:relative;}
-  .setup h3{font-size:14px;margin-bottom:6px;color:var(--red);}
-  .setup code{display:inline-block;background:var(--bg);border-radius:6px;padding:3px 6px;word-break:break-all;font-size:12.5px;color:var(--text);}
-  
   /* timeline */
   section{margin-bottom:26px;}
   .section-title{font-size:15px;margin-bottom:10px;color:var(--muted);font-weight:500;}
@@ -106,18 +101,10 @@
     <h1>2026 → 2032</h1>
     <div class="today" id="todayLabel"></div>
   </div>
-  <div class="sync-status" id="syncStatus"><span class="dot" id="syncDot"></span><span id="syncText">checking sync…</span> <button id="syncNowBtn" style="display:none;">sync now</button></div>
-
-  <div class="setup" id="setupBanner" style="display:none;">
-    <h3>Cloud sync requires a manual ID</h3>
-    <p>Your browser blocked the app from automatically generating a cloud save. To fix this permanently:</p>
-    <ul style="margin:8px 0; padding-left:20px;">
-      <li>Go to <a href="https://jsonblob.com" target="_blank">jsonblob.com</a> and click <strong>Save</strong>.</li>
-      <li>Copy the long string of numbers at the end of the new URL.</li>
-      <li>Open your <code>index.html</code> in your GitHub repo.</li>
-      <li>Paste the ID into <code>const SYNC_ID = "";</code> near the top of the script.</li>
-      <li>Commit the change. Sync will now work flawlessly across all devices.</li>
-    </ul>
+  <div class="sync-status" id="syncStatus">
+    <span class="dot" id="syncDot"></span>
+    <span id="syncText">checking sync…</span> 
+    <button id="syncNowBtn">retry sync</button>
   </div>
 
   <section>
@@ -147,15 +134,7 @@
 </div>
 
 <script>
-/* ============ CLOUD SYNC SETUP ============
-   1. Go to https://jsonblob.com
-   2. Click the "Save" button at the top right.
-   3. Copy the long ID from the URL (e.g., jsonblob.com/131456...)
-   4. Paste that ID inside the quotes below.
-*/
-const SYNC_ID = "01a06ba5-abcb-7d3a-9b46-619cd267c293"; 
-/* =========================================== */
-
+const HARDCODED_ID = "01a06ba5-abcb-7d3a-9b46-619cd267c293";
 const BLOB_API = "https://jsonblob.com/api/jsonBlob";
 
 function defaultState(){
@@ -270,8 +249,14 @@ function defaultState(){
 }
 
 let state = null;
-let syncId = null;
 let saveTimer = null;
+
+function validateState(parsed){
+  if (!parsed || typeof parsed !== 'object') return null;
+  if (!Array.isArray(parsed.phases) || parsed.phases.length === 0) return null;
+  if (typeof parsed.currentPhaseIndex !== 'number') parsed.currentPhaseIndex = 0;
+  return parsed;
+}
 
 function daysUntil(dateStr){
   const d = new Date(dateStr+"T00:00:00");
@@ -335,6 +320,7 @@ function expectedPosition(){
 function actualPosition(){
   const idx = state.currentPhaseIndex;
   const ph = state.phases[idx];
+  if(!ph) return 0;
   const done = ph.tasks.filter(t=>t.pct>=100).length;
   const total = ph.tasks.length;
   return idx + (total? done/total : 0);
@@ -367,8 +353,10 @@ function renderTimeline(){
   if(diff > 0.15){ word = "ahead of pace"; cls="ahead"; }
   else if(diff < -0.15){ word = "behind pace"; cls="behind"; }
   else { word = "on pace"; cls="ontrack"; }
+  
+  const currentTitle = state.phases[state.currentPhaseIndex] ? state.phases[state.currentPhaseIndex].title : "";
   document.getElementById("tlStatus").innerHTML =
-    `You're in <strong>${state.phases[state.currentPhaseIndex].title}</strong> — <span class="pace ${cls}">${word}</span>.`;
+    `You're in <strong>${currentTitle}</strong> — <span class="pace ${cls}">${word}</span>.`;
 }
 
 function renderPhases(){
@@ -455,37 +443,50 @@ function adjustTask(phase, task, delta){
 }
 
 /* ---------- Persistence ---------- */
-function urlSyncId(){
-  return new URLSearchParams(location.search).get("sync");
+function getActiveSyncId(){
+  const urlParam = new URLSearchParams(window.location.search).get("sync");
+  if(urlParam) {
+    localStorage.setItem("roadmap_sync_id", urlParam);
+    return urlParam;
+  }
+  return localStorage.getItem("roadmap_sync_id") || HARDCODED_ID;
 }
 
 async function loadState(){
-  syncId = SYNC_ID || urlSyncId() || localStorage.getItem("roadmap_sync_id") || null;
-
-  if(syncId){
-    try{
-      const res = await fetch(`${BLOB_API}/${syncId}`);
-      if(res.ok){
-        state = await res.json();
-        localStorage.setItem("roadmap_sync_id", syncId);
-        localStorage.setItem("roadmap_state_cache", JSON.stringify(state));
-        setSyncStatus(true);
-        render();
-        return;
-      }
-    }catch(e){ /* fall through to local cache if offline */ }
-  }
-
-  // Fallback if no ID is set or fetch fails
+  // Load local cache immediately so UI displays fast
   const cached = localStorage.getItem("roadmap_state_cache");
-  state = cached ? JSON.parse(cached) : defaultState();
-  setSyncStatus(false);
-  
-  if(!SYNC_ID) {
-    document.getElementById("setupBanner").style.display = "block";
+  if (cached) {
+    try {
+      const parsed = validateState(JSON.parse(cached));
+      if (parsed) state = parsed;
+    } catch(e){}
+  }
+
+  if (!state) state = defaultState();
+  render();
+
+  // Try fetching from cloud
+  const syncId = getActiveSyncId();
+  if (syncId) {
+    try {
+      const res = await fetch(`${BLOB_API}/${syncId}`, {
+        headers: { "Accept": "application/json" }
+      });
+      if (res.ok) {
+        const remoteData = validateState(await res.json());
+        if (remoteData) {
+          state = remoteData;
+          localStorage.setItem("roadmap_state_cache", JSON.stringify(state));
+          setSyncStatus(true);
+          render();
+          return;
+        }
+      }
+    } catch(e){}
   }
   
-  render();
+  // If fetch failed or yielded empty data, attempt initialization update
+  pushToCloud();
 }
 
 function saveState(){
@@ -495,16 +496,20 @@ function saveState(){
 }
 
 async function pushToCloud(){
+  const syncId = getActiveSyncId();
   if(!syncId) return;
   document.getElementById("syncText").textContent = "syncing…";
   try{
     const res = await fetch(`${BLOB_API}/${syncId}`, {
       method:"PUT",
-      headers:{"Content-Type":"application/json"},
+      headers:{
+        "Content-Type":"application/json",
+        "Accept":"application/json"
+      },
       body: JSON.stringify(state)
     });
     setSyncStatus(res.ok);
-  }catch(e){
+  } catch(e){
     setSyncStatus(false);
   }
 }
@@ -519,16 +524,12 @@ function setSyncStatus(ok){
     btn.style.display = "none";
   } else {
     dot.className = "dot off";
-    txt.textContent = "local only — not synced";
+    txt.textContent = "local mode (click to sync)";
     btn.style.display = "inline";
   }
 }
 
-document.getElementById("syncNowBtn").addEventListener("click", async ()=>{
-  if(!syncId) return;
-  await pushToCloud();
-  render();
-});
+document.getElementById("syncNowBtn").addEventListener("click", pushToCloud);
 
 loadState();
 </script>
