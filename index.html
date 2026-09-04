@@ -130,10 +130,8 @@
 </div>
 
 <script>
-/* === PASTE YOUR GITHUB DETAILS HERE === */
-const GITHUB_TOKEN = "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";
-const GIST_ID = "138c227665a11f0615ece5d4ddee8459";
-/* ======================================= */
+const BIN_ID = "6a9a8f08f5f4af5e296941b1";
+const API_KEY = "$2a$10$hlqfMzR5Oh/4/9sT94qsn.9nKQ.nyIYDwhpAXEDkOuFVmjKz.JDtm";
 
 function defaultState(){
   return {
@@ -433,60 +431,45 @@ function adjustTask(phase, task, delta){
   saveState();
 }
 
-/* ---------- Persistence via GitHub Gist ---------- */
+/* ---------- Persistence via JSONbin.io ---------- */
 async function loadState(){
   render();
-  if(!GITHUB_TOKEN || !GIST_ID || GITHUB_TOKEN.includes("PASTE")) {
-    setSyncStatus(false, "missing API token");
-    return;
-  }
-
   try {
-    const res = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
-      headers: { "Authorization": `token ${GITHUB_TOKEN}` }
+    const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
+      headers: { "X-Master-Key": API_KEY }
     });
     if(res.ok){
       const data = await res.json();
-      if(data.files && data.files["roadmap.json"] && data.files["roadmap.json"].content){
-        const parsed = JSON.parse(data.files["roadmap.json"].content);
-        if(parsed && parsed.phases){
-          state = parsed;
-          render();
-          setSyncStatus(true);
-          return;
-        }
+      if(data.record && data.record.phases){
+        state = data.record;
+        render();
+        setSyncStatus(true);
+        return;
       }
-      // If Gist is empty, save initial state
       pushToCloud();
     } else {
-      setSyncStatus(false, "Gist error");
+      setSyncStatus(false, "access denied");
     }
   } catch(e) {
-    setSyncStatus(false, "connection error");
+    setSyncStatus(false, "network error");
   }
 }
 
 function saveState(){
   if(saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(pushToCloud, 300);
+  saveTimer = setTimeout(pushToCloud, 400);
 }
 
 async function pushToCloud(){
-  if(!GITHUB_TOKEN || !GIST_ID || GITHUB_TOKEN.includes("PASTE")) return;
   document.getElementById("syncText").textContent = "saving…";
-  
   try {
-    const res = await fetch(`https://api.github.com/gists/${GIST_ID}`, {
-      method: "PATCH",
+    const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
+      method: "PUT",
       headers: {
-        "Authorization": `token ${GITHUB_TOKEN}`,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "X-Master-Key": API_KEY
       },
-      body: JSON.stringify({
-        files: {
-          "roadmap.json": { content: JSON.stringify(state, null, 2) }
-        }
-      })
+      body: JSON.stringify(state)
     });
     setSyncStatus(res.ok);
   } catch(e) {
